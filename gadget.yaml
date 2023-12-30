@@ -1,0 +1,6 @@
+name: GadgetDemo
+commands:
+- name: demo
+  path: cmd/demo.go
+tags:
+  createdBy: stefan.siprell@gmail.com

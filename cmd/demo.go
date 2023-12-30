@@ -2,37 +2,23 @@ package main
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/stefan79/gadgeto/pkg/bootstrap"
+	"github.com/stefan79/gadgeto/pkg/resources/aws/apigw"
 	"github.com/stefan79/gadgeto/pkg/resources/aws/gs3"
-	"github.com/stefan79/gadgeto/pkg/triggers/native"
+	"github.com/stefan79/gadgeto/pkg/triggers/route"
 )
 
 type (
 	Setup struct {
 		MyS3Bucket gs3.Client
 	}
-)
-
-/*
-func (s *Setup) handleCreateCustomerCall(request triggers.Request, response triggers.Response) error {
-	key, ok := request.QueryParams["key"]
-	var err error
-	if !ok {
-		response.ResponseCode = 400
-	} else {
-		err = s.MyS3Bucket.WriteToObject(key, request.Body)
+	Deploy struct {
+		MyAPIGW apigw.APIGatewayClient
 	}
-	return err
-}
-*/
-
-func (s *Setup) handleNativeCall(ctx context.Context, input Input) (Output, error) {
-	err := s.MyS3Bucket.WriteToObject(input.Key, []byte(input.Body))
-	return Output{
-		Message: "OK",
-	}, err
-}
+)
 
 type Input struct {
 	Key  string
@@ -43,13 +29,33 @@ type Output struct {
 	Message string
 }
 
+func (s *Setup) CreateCustomer(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+
+	name := request.QueryStringParameters["name"]
+	message := fmt.Sprintf("Hello %s", name)
+	err := s.MyS3Bucket.WriteToObject(name, []byte(message))
+	if err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       err.Error(),
+		}, nil
+	}
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Body:       "OK",
+	}, nil
+}
+
 func main() {
 	ctx := bootstrap.NewContext()
-	/*NewContext().
-	WithAppName("demo").
-	WithTags("stefan", "gadget").
-	WithPermission("s3:PutObject", "*").
-	Build()*/
+
+	deployment := &Deploy{
+		MyAPIGW: apigw.
+			NewApiGatewayClient("demo", ctx).
+			AddTag("stefan", "gadget").
+			Build(),
+	}
 
 	setup := &Setup{
 		MyS3Bucket: gs3.
@@ -57,12 +63,11 @@ func main() {
 			WithBucketName("stefansiprell1979test").
 			Build(),
 	}
-	native.
-		NewNativeTrigger[Input, Output]("mainTrigger", ctx).
-		Build().
-		Handle(setup.handleNativeCall)
 
-		//apigw.ApiGateway("CreateCustomer").WithMethod("POST").Build(ctx).Handle(setup.handleCreateCustomerCall)
+	route.NewTrigger("putCustomer", deployment.MyAPIGW).
+		WithKey(route.POST, "/customers").
+		Build().
+		Handle(setup.CreateCustomer)
 
 	ctx.Complete()
 }
